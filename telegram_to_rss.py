@@ -97,8 +97,7 @@ def media_urls(message: etree._Element) -> list[str]:
     urls: list[str] = []
     media_nodes = message.xpath(
         f".//*[{has_class('tgme_widget_message_photo_wrap')} or "
-        f"{has_class('tgme_widget_message_video_thumb')} or "
-        f"{has_class('link_preview_image')}]"
+        f"{has_class('tgme_widget_message_video_thumb')}]"
     )
     for node in media_nodes:
         style = node.get("style", "") or ""
@@ -106,10 +105,29 @@ def media_urls(message: etree._Element) -> list[str]:
         if match:
             urls.append(urljoin(TELEGRAM_BASE, match.group(1)))
     for node in message.xpath(".//video[@poster] | .//img[@src]"):
+        if any(
+            "link_preview" in (ancestor.get("class", "") or "")
+            for ancestor in node.iterancestors()
+        ):
+            continue
         value = node.get("poster") or node.get("src")
         if value:
             urls.append(urljoin(TELEGRAM_BASE, value))
     return list(dict.fromkeys(urls))
+
+
+def body_without_title(body_html: str, plain_text: str) -> str:
+    """Remove Telegram's first text line because RSS <title> already contains it."""
+    parts = re.split(r"<br\s*/?>", body_html, maxsplit=1, flags=re.I)
+    if len(parts) == 2:
+        body = parts[1]
+        body = re.sub(r"^(?:\s|&nbsp;|<br\s*/?>)+", "", body, flags=re.I)
+        return body.strip()
+
+    lines = [line.strip() for line in plain_text.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return ""
+    return "<br><br>".join(html_module.escape(line) for line in lines[1:])
 
 
 def make_title(text: str, post_id: int) -> str:
@@ -142,14 +160,15 @@ def parse_page(html_text: str, channel: str) -> list[dict]:
         else:
             body_html = ""
 
+        body_html = body_without_title(body_html, text)
         media = media_urls(message)
         images_html = "".join(
             f'<p><img src="{url}" alt="Изображение из публикации"></p>'
             for url in media
         )
-        description = images_html + body_html
-        if not description:
-            description = f'<p><a href="{link}">Открыть публикацию в Telegram</a></p>'
+        body_block = body_html or ""
+        source_block = f'<p><a href="{link}">{link}</a></p>'
+        description = images_html + "<p>&nbsp;</p>" + body_block + source_block
 
         time_nodes = message.xpath(".//time[@datetime]")
         time_node = time_nodes[0] if time_nodes else None
