@@ -1,0 +1,59 @@
+name: Update and publish RSS
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7,17,27,37,47,57 * * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Build RSS feed
+        run: |
+          mkdir -p public
+          python telegram_to_rss.py AoMurmansk \
+            --output public/AoMurmansk.xml \
+            --max-items 30 \
+            --feed-url https://vvg1975.github.io/TG-aomurmansk-rss/AoMurmansk.xml
+          touch public/.nojekyll
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload RSS for GitHub Pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Publish RSS
+        id: deployment
+        uses: actions/deploy-pages@v4
